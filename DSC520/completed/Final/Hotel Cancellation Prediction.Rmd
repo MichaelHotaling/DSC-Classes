@@ -1,0 +1,420 @@
+---
+title: 'Predicting Hotel Reservation Cancellations using Machine Learning'
+author: "Michael Hotaling"
+date: "11/21/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Abstract
+---
+Last minute cancellations are a part of life. We’ve all had plans that have fallen through at one point in our lives, especially considering todays events, and we’ve had to cancel a plane ticket or hotel reservation at some point in our lives. Luckily for the consumer, many hotels offer free cancellation policies due to competition. Although it might seem like a minor thing, canceling reservations can become a costly expense for many hotels. For example, in 2018, nearly 40% of 40% of on-the-books revenue was lost due to cancellations. (Funnell, 2019) (Hertzfeld, 2019) (d-edge, 2019)
+
+For my term project, I will be using a dataset containing hotel demand data between July 2015 and August 2017 for two hotels and a total of 12,000 observations.  (Antonio, Ana, & Nunes, 2019)
+
+Research Questions
+---
+a. Are hotel cancellations predictable based on certain data attributes?
+
+b. Which attributes are best correlated with reservation cancellations?
+
+c. Can we predict how many cancellations there will be based on the time of year?
+
+d. Do most cancellations happen within a certain time frame (e.g. 6 weeks out)?
+
+e. Will predicting cancellations provide any insightful data (cost savings)?
+
+f. Will a model that predicts city hotel reservation cancellations work on data from a resort hotel and vice versa?
+
+
+The Data
+---
+The data is comprised of several attributes, listed below:
+
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+library(caTools)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(corrplot)
+library(caret)
+library(knitr)
+
+H1 <- read.csv("H1.csv")
+H1$Location <- as.factor("City")
+
+H2 <- read.csv("H2.csv")
+H2$Location <- as.factor("Resort")
+
+df <- rbind(H1,H2)
+print(colnames(df))
+
+```
+Data cleaning
+---
+Before starting, I need to clean the data up slightly. Some values should be converted to factors. I will also be engineering some extra attributes to help us determine when customers book their reservations and when they plan on checking out.
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+# This attribute needs to be turned into a proper date format
+df$ReservationStatusDate <- as.Date(df$ReservationStatusDate)
+
+# These need to be factors
+df$IsCanceled <- as.logical(df$IsCanceled)
+df$IsRepeatedGuest <- as.logical(df$IsRepeatedGuest)
+
+# Naming the days of the week reservation starts
+df$ReservationDayName <- as.factor(as.POSIXlt(df$ReservationStatusDate)$wday + 1)
+levels(df$ReservationDayName) <- c("Sunday", "Monday", "Tuesday", "Wednesday", 
+                                   "Thursday", "Friday", "Saturday")
+
+# Date, Day of Week, and Month Reservation was made
+df$DateResMade <- as.Date(as.POSIXct.Date(as.numeric(df$ReservationStatusDate) - df$LeadTime))
+df$DayResMadeName <- as.factor(as.POSIXlt(df$DateResMade)$wday + 1)
+levels(df$DayResMadeName) <- c("Sunday", "Monday", "Tuesday", 
+                               "Wednesday", "Thursday", "Friday", "Saturday")
+df$MonthResMade <- as.factor(as.numeric(format(df$DateResMade,"%m")))
+levels(df$MonthResMade) <-c("January","Feburary","March",
+                            "April","May","June",
+                            "July","August","September",
+                            "October","November","December")
+
+
+# Total Days Stayed
+df$StaysTotalDays <- df$StaysInWeekendNights + df$StaysInWeekNights
+
+# Checkout Date
+df$CheckoutDate <-as.Date(as.POSIXct.Date(as.numeric(df$ReservationStatusDate) + df$StaysTotalDays))
+df$CheckoutDateName <- as.factor(as.POSIXlt(df$CheckoutDate)$wday + 1)
+levels(df$CheckoutDateName) <- c("Sunday", "Monday", "Tuesday", "Wednesday", 
+                                 "Thursday", "Friday", "Saturday")
+
+# Naming Months (For Graphics)
+levels(df$ArrivalDateMonth) <-c("January","Feburary","March",
+                            "April","May","June",
+                            "July","August","September",
+                            "October","November","December")
+
+
+```
+
+
+
+EDA
+---
+We will first explore this data using some EDA. For this exercise, I'll be utilizing ggplot2 and corrplot. 
+
+Let's first check to see if there are any strong correlations in our data. We can use corrplot to create a correlation map for the numeric values in our dataset. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+corrplot(cor(df[ , purrr::map_lgl(df, is.numeric)],use="pairwise.complete.obs"), method = "color", diag = FALSE)
+
+```
+There aren't too many highly correlated values in our dataset, which should prevent any collinearity. Now let's investigate the lead-time for our reservations.  
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+ggplot(data = df, aes(x = LeadTime, fill = ReservationStatus)) + 
+geom_histogram(bins = 60) + 
+theme_bw() + 
+xlab("Lead Time for Reservation (in days)") + 
+ylab("Count") + 
+xlim(0,365) + 
+ylim(0,7500) +
+labs(title = "Hotel Cancellations - Lead Time",
+              subtitle = "Most reservations are booked shortly before the planned arrival",
+              caption = "Michael Hotaling: Bellevue University")
+
+ggplot(data = df, aes(x = LeadTime, fill = ReservationStatus)) + 
+geom_histogram(bins = 52, position = "fill") + 
+theme_bw() + 
+ggtitle("Hotel Cancellations - Lead Time") +
+xlab("Lead Time for Reservation (days)") + 
+ylab("Percentage") +
+xlim(0,365) +
+scale_y_continuous(labels = scales::percent) + 
+#facet_wrap(vars(Location), scale = "free", nrow = 2) + 
+labs(title = "Hotel Cancellations - Lead Time",
+              subtitle = "Increased Lead Time Tends to Increase Chances of Cancellations",
+              caption = "Michael Hotaling: Bellevue University")
+
+```
+
+
+From this data, we can see that most of our reservations are made closer to the date of check-in than not. We can also see that reservations made farther out are more likely to fall through. 
+
+Next, let's example the time of year people plan to arrive to the hotel. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+ggplot(data = df, aes(x = ArrivalDateMonth, fill = ReservationStatus )) + 
+geom_bar(stat = "count") + 
+theme_bw() + 
+xlab("Month of Reservation") + 
+ylab("Count") + 
+theme(axis.text.x = element_text(angle = 90))+ 
+facet_wrap(vars(Location), scale = "free", nrow = 2) + 
+labs(title = "Month of Expected Arrival",
+              subtitle = "Summer and holiday months tend to be booked more frequently",
+              caption = "Michael Hotaling: Bellevue University")
+
+```
+
+From this graphic, we can see that the most popular times of the year are the summer and holiday months, especially for the resort hotel. 
+
+Building off of the lead time and date of reservation, we can investigate to see when most reservations are made. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+ggplot(data = df, aes(x = MonthResMade, fill = ReservationStatus )) + 
+geom_bar(stat = "count") + 
+theme_bw() + 
+xlab("Month of Reservation") + 
+ylab("Count") + 
+theme(axis.text.x = element_text(angle = 90)) + 
+facet_wrap(vars(Location), scale = "free", nrow = 2) + 
+labs(title = "Which Month Reservations are Made",
+              subtitle = "Most reservations are made in the Winter",
+              caption = "Michael Hotaling: Bellevue University")
+
+ggplot(data = df, aes(x = ArrivalDateMonth, fill = ReservationStatus)) + 
+geom_bar(stat = "count", position = "fill") + 
+theme_bw() + 
+ggtitle("Month of Scheduled Reservations") + 
+xlab("Month of Reservation") + 
+ylab("Percentage") + 
+facet_wrap(vars(Location), scale = "free", nrow = 2) + 
+theme(axis.text.x = element_text(angle = 90)) + 
+scale_y_continuous(labels = scales::percent)
+
+```
+From this graphic, we can see more reservations are made in the winter months and the time of year the booking was made doesn't have any impact on our cancellation rates. 
+
+Similar to the above, we can see what days are reservation are made for. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+ggplot(data = df, aes(x = ReservationDayName, fill = ReservationStatus)) + 
+geom_bar(stat = "count") + 
+theme_bw() + 
+ggtitle("Day of Week of Scheduled Reservations") + 
+xlab("Day of Week") + 
+ylab("Count") + 
+labs(title = "Day of Week of Scheduled Reservations",
+              caption = "Michael Hotaling: Bellevue University")
+
+ggplot(data = df, aes(x = ReservationDayName, fill = ReservationStatus)) + 
+geom_bar(stat = "count", position = "fill") + 
+theme_bw() + 
+ggtitle("Day of Week of Scheduled Reservations") + 
+xlab("Day of Week") + 
+ylab("Percentage") + 
+scale_y_continuous(labels = scales::percent) +
+labs(title = "Day of Week of Scheduled Reservations",
+              caption = "Michael Hotaling: Bellevue University")
+
+```
+
+We seem to have reservations for almost every day of the week, but reservations are less likely to be canceled on Saturdays and Sundays rather than the weekdays. 
+
+Machine Learning
+---
+
+Since we will be determining whether or not a reservation will be canceled, a logistic model can be use in conjunction with our data. We can split our data up into training and testing subsets to verify the model is accurate. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+
+set.seed(520)
+sample <- sample.split(df$IsCanceled, SplitRatio = 0.7)
+
+train <- subset(df, sample == TRUE)
+test <-subset(df, sample == FALSE)
+
+model <- glm(IsCanceled ~ LeadTime + StaysInWeekendNights + 
+             StaysInWeekNights + Adults + Babies + 
+             IsRepeatedGuest + PreviousCancellations + 
+             PreviousBookingsNotCanceled + BookingChanges + 
+             RequiredCarParkingSpaces + TotalOfSpecialRequests + 
+             ReservationDayName + DayResMadeName + MonthResMade + CheckoutDateName, data = train , family = "binomial")
+
+model <- step(model, trace = FALSE, warnings = FALSE)
+
+summary(model)
+
+
+test$pred <- as.numeric(predict(model, test, type ="response") > 0.5)
+confusionMatrix(as.factor(as.logical(test$pred)), as.factor(as.logical(test$IsCanceled)))
+
+
+```
+
+We have a accuracy rating of about 75%, but many false positive errors.
+
+We can try another machine learning algorithm known as the Decision Tree to attempt to get a better score. 
+
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+tree <- rpart(IsCanceled ~ LeadTime + ArrivalDateMonth +ArrivalDateWeekNumber +ArrivalDateDayOfMonth +StaysInWeekendNights + StaysInWeekNights+ Adults + Children + Babies +Meal +MarketSegment + DistributionChannel + IsRepeatedGuest + PreviousCancellations + PreviousBookingsNotCanceled + ReservedRoomType + AssignedRoomType + BookingChanges + DepositType   + DaysInWaitingList + CustomerType + ADR + RequiredCarParkingSpaces + TotalOfSpecialRequests  + Location + ReservationDayName, data = train, method = "class")
+
+fancyRpartPlot(tree, cex = 0.6, main = "Hotel Cancellations")
+
+tree.pred <- predict(tree, test, type = "class")
+
+confusionMatrix(as.factor(tree.pred), as.factor(test$IsCanceled))
+
+```
+
+Using a Decision Tree, we were able to reclaim 5% more accuracy, increasing our total accurate to 81%. We were also able to reduce the amount of false positive errors in our analysis.
+
+
+Answering the Research Questions.
+---
+
+Research Questions
+---
+a. Are hotel cancellations predictable based on certain data attributes?
+
+we were able to achieve an accuracy of 81% when attempting to predict whether or not a customer might cancel their reservation, indicating that hotel cancellations are predictable to some extent. Additional data might help us improve accuracy.
+
+
+b. Which attributes are best correlated with reservation cancellations?
+
+Since we made two different models, we can go over each one.
+
+The logistic model was able to use most of the attributes we fed it. The attributes that were most highly correlated with cancellation were lead-time, number of nights stayed, number of adults, if the customer was a repeated guest and didn't cancel a booking before, The day the booking was made for, the time of month the booking is for, and several others. I believe that the number of attributes we passed into the model was much too high, and it might have caused some overfitting. Going back over the data and analyzing some of the redudant attributes might help the model become more accurate
+
+the Decision Tree only uses a few attributes, such as Deposit Type, Lead Time, Market segmentation, and a few others. The fact that the model can achieve a much better fit to our test data in comparison to our logistic model is quite impressive
+
+
+c. Can we predict how many cancellations there will be based on the time of year?
+
+I originally wanted to create a Poisson Regression model to predict the seasonality and cyclicality of reservation cancellations, but I wasn't able to do it. This is something that I would be interesting in solving at a later time, but for now, we will leave this question open.
+
+d. Do most cancellations happen within a certain time frame (e.g. 6 weeks out)?
+
+When I first was analyzing this data, I didn't realize the date of cancellation wasn't included. I won't be able to answer this question without having access to the date of cancellation. We could in theory create a survival analysis using that data which would provide an interesting insight into more risk assessment models for our customers. 
+
+We can see from the first two EDA graphics that reservations were much more likely to fall through as time went on, but there isn't a general cutoff that I was expecting to see. 
+
+e. Will predicting cancellations provide any insightful data (cost savings
+
+Being able to predict whether or not a customer might cancel can have a huge economic impact. Typically, when a reservation is made, the room is locked until that customer leaves or the customer cancels their reservation. If a customer cancels their reservation last minute and customers which were looking for a room before weren't able to get one, revenue is lost. If we can successfully predict whether or not a customer will cancel their reservation, we can use that data to "soft reserve" a room by still allowing other bookings. When the customer does cancel, the revenue from that room isn't lost. 
+
+f. Will a model that predicts city hotel reservation cancellations work on data from a resort hotel and vice versa?
+
+We can easily test this by creating the models and comparing their performance on data from the opposing hotel. 
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+tree <- rpart(IsCanceled ~ LeadTime + ArrivalDateMonth +
+              ArrivalDateWeekNumber +ArrivalDateDayOfMonth +
+              StaysInWeekendNights + StaysInWeekNights + 
+              Adults + Children + Babies + Meal +
+              IsRepeatedGuest + PreviousCancellations + 
+              PreviousBookingsNotCanceled + ReservedRoomType +  
+              BookingChanges + DepositType  + 
+              DaysInWaitingList + CustomerType + 
+              ADR + RequiredCarParkingSpaces + 
+              TotalOfSpecialRequests  + Location + 
+              ReservationDayName, 
+              data = subset(df, Location == "City") , 
+              method = "class")
+fancyRpartPlot(tree, cex = 0.6, main = "Hotel Cancellations: City Model")
+
+res <- subset(df, Location == "Resort")
+
+tree.pred <- predict(tree, res, type = "class")
+
+confusionMatrix(tree.pred, as.factor(res$IsCanceled))
+
+```
+
+Our City Model results work pretty well on our resort hotel data. we have an accuracy of about 80%. 
+
+Let's try building our model using resort hotel data and testing it against the city hotel.
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+tree <- rpart(IsCanceled ~ LeadTime + ArrivalDateMonth +
+              ArrivalDateWeekNumber +ArrivalDateDayOfMonth +
+              StaysInWeekendNights + StaysInWeekNights + 
+              Adults + Children + Babies +
+              IsRepeatedGuest + PreviousCancellations + 
+              PreviousBookingsNotCanceled + 
+              BookingChanges + DepositType  + 
+              DaysInWaitingList + CustomerType + 
+              ADR + RequiredCarParkingSpaces + 
+              TotalOfSpecialRequests  + Location + 
+              ReservationDayName, 
+              data = subset(df, Location == "Resort") , 
+              method = "class")
+fancyRpartPlot(tree, cex = 0.6, main = "Hotel Cancellations: Resort Model")
+
+city <- subset(df, Location == "City")
+
+tree.pred <- predict(tree, city, type = "class")
+
+confusionMatrix(tree.pred, as.factor(city$IsCanceled))
+
+```
+Our model is still relatively accurate at 77% accuracy, but we have a lot more false positive values than our previous model. 
+
+We can also try to use our logistic regression regression to see if we get different results.
+
+
+Model Trained on City Data:
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+model <- glm(IsCanceled ~ LeadTime + StaysInWeekendNights + 
+             StaysInWeekNights + Adults + Babies + 
+             IsRepeatedGuest + PreviousCancellations + 
+             PreviousBookingsNotCanceled + BookingChanges + 
+             RequiredCarParkingSpaces + TotalOfSpecialRequests + 
+             ReservationDayName + DayResMadeName + MonthResMade + CheckoutDateName, data = city , family = "binomial")
+
+model <- step(model, trace = FALSE, warnings = FALSE)
+
+res$pred <- as.numeric(predict(model, res, type ="response") > 0.5)
+confusionMatrix(as.factor(as.logical(res$pred)), as.factor(as.logical(res$IsCanceled)))
+```
+
+Model Trained on Resort Data:
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE}
+
+model <- glm(IsCanceled ~ LeadTime + StaysInWeekendNights + 
+             StaysInWeekNights + Adults + Babies + 
+             IsRepeatedGuest + PreviousCancellations + 
+             PreviousBookingsNotCanceled + BookingChanges + 
+             RequiredCarParkingSpaces + TotalOfSpecialRequests + 
+             ReservationDayName + DayResMadeName + MonthResMade + CheckoutDateName, data = res , family = "binomial")
+
+model <- step(model, trace = FALSE, warnings = FALSE)
+
+city$pred <- as.numeric(predict(model, city, type ="response") > 0.5)
+confusionMatrix(as.factor(as.logical(city$pred)), as.factor(as.logical(city$IsCanceled)))
+```
+
+Both models show around 75% accuracy, which is about where our other model was. 
+
+Both models seem to show some general accuracy as oppose to random pick, but if deployed at a real hotel, the model should be used on that hotels data since the reason for booking the hotel may be different depending on the location of the hotel.
+
+
+Resources
+---
+d-edge. (2019, October 4). HOW ONLINE HOTEL DISTRIBUTION IS CHANGING IN EUROPE: A Deep-dive into European Hotel Distribution trends 2014-2018. Retrieved from d-edge: Hospitality Solutions: https://www.d-edge.com/how-online-hotel-distribution-is-changing-in-europe/
+
+Funnell, R. (2019, May 10). The real cost of ‘free’ cancellations. Retrieved from Triptease: https://triptease.com/blog/the-real-cost-of-free-cancellations/
+
+Hertzfeld, E. (2019, April 23). Study: Cancellation rate at 40% as OTAs push free change policy. Retrieved from Hotel Management: https://www.hotelmanagement.net/tech/study-cancelation-rate-at-40-as-otas-push-free-change-policy
+
+Ward, B. (2019, Feburary 12). Introduction to Tidyverse : readr, tibbles, tidyr & dplyr. Retrieved from Medium.com: https://medium.com/@brianward1428/introduction-to-tidyverse-7b3dbf2337d5

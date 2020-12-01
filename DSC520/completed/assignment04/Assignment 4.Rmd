@@ -1,0 +1,155 @@
+---
+title: "Assignment 4"
+author: "Michael Hotaling"
+date: '2020-09-22'
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+bibliography: bibliography.bib
+---
+
+Markdown Basics
+---
+
+
+Favorite Foods
+---
+1. Pizza
+2. Tacos
+3. Pad Thai
+
+Images
+---
+![Me]("MFW.jpg"){width=40%}
+
+
+Add a Quote
+---
+> The path of the righteous man is beset on all sides by the
+Inequities of the selfish and the tyranny of evil men
+Blessed is he who, in the name of charity and good will
+shepherds the weak through the valley of darkness
+for he is truly his brother's keeper and the finder of lost children
+And I will strike down upon thee with great vengeance and furious
+Anger those who attempt to poison and destroy my brothers
+And you will know
+My name is the Lord when I lay my vengeance upon thee. Ezekiel 25:17
+
+Add an Equation
+---
+\begin{equation}
+ \Pr(A|B)=\frac{\Pr(B|A)\Pr(A)}{\Pr(B|A)\Pr(A)+\Pr(B|\neg A)\Pr(\neg A)}
+\end{equation}
+
+
+Add a Footnote
+---
+A footnote will follow.^[This is a footnote.]
+
+
+## Add Citations
+
+* R for Everyone @lander2014r
+* Discovering Statistics Using R @field2012discovering
+
+Inline Code
+---
+2 plus 2 is equal to `r 2 + 2`
+
+```{r, message=FALSE, warning=FALSE, echo = FALSE} 
+
+library(ggplot2)
+setwd("..")
+setwd("..")
+covid_df <- read.csv("data/nytimes/covid-19-data/us-states.csv")
+
+covid_df$date <- as.Date(covid_df$date)
+
+california_df <- covid_df[ which( covid_df$state == "California"), ]
+ny_df <- covid_df[ which( covid_df$state == "New York"), ]
+florida_df <- covid_df[ which( covid_df$state == "Florida"), ]
+
+ggplot(data=florida_df, aes(x=date, group=1)) +
+  geom_line(aes(y = cases, colour = "Florida"), size = 1) +
+  geom_line(data=ny_df, aes(y = cases,colour="New York"), size = 1) +
+  geom_line(data=california_df, aes(y = cases, colour="California") , size = 1) +
+  scale_colour_manual("",
+                      breaks = c("Florida", "New York", "California"),
+                      values = c("darkred", "darkgreen", "Steelblue")) +
+  xlab(" ") + ylab("Cases") + scale_y_log10() +
+  ggtitle("NY Times COVID-19 Data") + 
+  theme_bw()
+
+
+```
+
+R4DS Heights vs Earnings
+---
+```{r, message=FALSE, warning=FALSE, echo = FALSE} 
+
+setwd("..")
+setwd("..")
+
+heights <- read.csv("data/r4ds/heights.csv")
+
+ggplot(data = heights, aes(x = height, y = earn)) + 
+  geom_point(aes(color = sex)) +
+  xlab("Height (Inches)") +
+  ylab("Earnings (Dollars)") +
+  ggtitle("Heights vs. Earnings") +
+  theme_bw()
+
+```
+
+Tables
+---
+
+Knitr Table with Kable
+---
+```{r, message=FALSE, warning=FALSE, echo = FALSE} 
+
+library(knitr)
+
+name <- c("Aragon", "Bilbo", "Frodo", "Galadriel", "Sam", "Gandalf", "Legolas", "Sauron", "Gollum")
+race <- c("Men", "Hobbit", "Hobbit", "Elf", "Hobbit", "Maia", "Elf", "Maia", "Hobbit")
+in_fellowship <- c(TRUE, FALSE, TRUE, FALSE, TRUE, TRUE, TRUE, FALSE, FALSE)
+ring_bearer <- c(FALSE, TRUE, TRUE, FALSE, TRUE, TRUE, FALSE, TRUE, TRUE)
+age <- c(88, 129, 51, 7000, 36, 2019, 2931, 7052, 589)
+
+characters_df <- data.frame(name, race, in_fellowship, ring_bearer, age)
+kable(characters_df, title = "One Ring to Rule Them All", caption = "One Ring to Rule Them All" )
+
+```
+
+
+Pandoc Table (using pander)
+---
+```{r, message=FALSE, warning=FALSE, echo = FALSE} 
+library(pander)
+panderOptions("table.split.table", Inf)
+smaller_df <- subset(characters_df, name %in% c("Aragon", "Bilbo", "Frodo", "Sam", "Sauron"))
+rownames(smaller_df) <- c()
+smaller_df$in_fellowship <- factor(smaller_df$in_fellowship, labels=c("No", "Yes"))
+smaller_df$ring_bearer <- factor(smaller_df$ring_bearer, labels=c("No", "Yes"))
+names(smaller_df) <- c("Name", "Race", "In Fellowship?", "Is Ring Bearer?", "Age")
+pander(smaller_df, caption = "The Lord of the Rings")
+
+
+```
+
+Pandoc Table (with manual inputs)
+---
+Name     Race	     In Fellowship?	     Is Ring Bearer?	     Age
+------- --------- ------------------ -------------------- -------
+Aragon  	Men	      Yes  	              No	                88
+Bilbo	    Hobbit   	No	                Yes               	129
+Frodo	    Hobbit	  Yes	                Yes	                51
+Sam	      Hobbit	  Yes	                Yes               	36
+Sauron   	Maia    	No	                Yes	                7052
+------- --------- ------------------ -------------------- -------
+
+
+
+
+# References
